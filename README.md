@@ -47,7 +47,7 @@ Top of `index.html`:
 | `DEPLOY_MIN` | 10 | stretch alarm length: minutes to grow from natural size to full |
 | `IDLE_GRACE` | 90 | seconds of quiet before shrinking starts |
 | `IDLE_FADE` | 1800 | idle seconds to drain a full accumulator (also applies to time offline) |
-| `MAX_FRAC` | 0.16 | max shadow radius vs screen |
+| `MAX_FRAC` | 0.08 | max shadow radius vs screen (glowing disk reaches ~3.4× this) |
 
 Shader look (disk size, inclination, Doppler strength, ring) — constants at
 the top of the fragment shader in `index.html`.

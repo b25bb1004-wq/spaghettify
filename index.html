@@ -25,7 +25,7 @@ uniform float     u_hasScreen; // 1 = lensing active, 0 = overlay-only fallback
 
 // ---- tunables ----
 const float DISK_INNER = 1.55;
-const float DISK_OUTER = 4.2;
+const float DISK_OUTER = 3.4;
 const float INCL       = 0.24;
 const float DOPPLER    = 0.55;
 const float RING_POS   = 1.06;
@@ -133,7 +133,7 @@ const DEPLOY_MIN = 10;     // stretch alarm: minutes to grow from natural size t
 const IDLE_GRACE = 90;
 const IDLE_FADE  = 1800;   // idle seconds to drain a full accumulator
 const MIN_R_PX   = 14;
-const MAX_FRAC   = 0.16;
+const MAX_FRAC   = 0.08;   // max shadow radius vs screen (disk reaches ~3.4x this)
 const CAP_FPS    = 30;     // capture frame rate
 
 // ============ state machine ============
