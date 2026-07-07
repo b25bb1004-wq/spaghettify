@@ -29,7 +29,7 @@ const float DISK_OUTER = 3.4;
 const float INCL       = 0.24;
 const float DOPPLER    = 0.55;
 const float RING_POS   = 1.06;
-const float LENS_GAIN  = 0.75;  // far-side disk arc through the photon sphere
+const float LENS_GAIN  = 0.60;  // far-side disk arc through the photon sphere
 const float THETA_E    = 1.35;  // Einstein radius, in shadow radii
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -70,9 +70,11 @@ vec3 disk(vec2 q) {
   float edge = smoothstep(DISK_INNER, DISK_INNER + 0.12, r)
              * (1.0 - smoothstep(DISK_OUTER - 1.2, DISK_OUTER, r));
   float g = 1.0 + DOPPLER * (-q.x / max(r, 1e-3));
-  float beam = pow(max(g, 0.08), 3.5);
-  float I = 2.2 * fall * edge * streaks * beam;
-  float temp = clamp(fall * (0.45 + 0.55 * beam), 0.0, 1.0);
+  float beam = pow(max(g, 0.08), 2.8);
+  float I = 1.3 * fall * edge * streaks * beam;
+  // cap the temperature below pure white — amber highlights read
+  // naturally over a desktop, blown-out white reads like a flashlight
+  float temp = clamp(fall * (0.45 + 0.55 * beam), 0.0, 1.0) * 0.8;
   return ramp(temp) * I;
 }
 
@@ -107,9 +109,9 @@ void main() {
   vec2 pinv = p * (1.15 / max(dot(p, p), 1e-4));
   col += disk(vec2(pinv.x, pinv.y / INCL)) * LENS_GAIN * vis;
 
-  // photon ring: tight, hot, with a slow shimmer
+  // photon ring: tight, warm, with a slow shimmer
   float ring = exp(-pow((d - RING_POS) * 14.0, 2.0));
-  col += vec3(1.0, 0.88, 0.66) * ring * (1.6 + 0.25 * sin(u_time * 2.1)) * vis;
+  col += vec3(1.0, 0.85, 0.58) * ring * (1.0 + 0.15 * sin(u_time * 2.1)) * vis;
 
   // shadow: rays inside the critical radius never reach you (crisp edge)
   float shadow = 1.0 - smoothstep(0.985, 1.0, d);
