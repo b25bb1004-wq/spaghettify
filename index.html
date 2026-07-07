@@ -307,7 +307,9 @@ function frame(tms) {
   const cy = H * wander.y;
 
   const maxR = Math.min(W, H) * MAX_FRAC;
-  const eased = grow * grow * (3 - 2 * grow);
+  // ease-OUT: visible growth right after appearing (smoothstep was flat
+  // near zero — the hole sat at starting size for the first ~10 minutes)
+  const eased = 1 - (1 - grow) * (1 - grow);
   // appear envelope scales the whole hole in/out; slow breathing keeps it alive
   const breath = 1 + 0.015 * Math.sin(t * 1.1);
   const radius = ((MIN_R_PX * DPR) + (maxR - MIN_R_PX * DPR) * eased) * appearEase * breath;
