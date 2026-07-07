@@ -16,12 +16,16 @@ approximation the stateless shader was forced into.
 
 ## Run it
 
-Needs Node 18+.
+Needs Node 18+. Works on macOS and Windows 10 (version 2004+) / 11.
 
 ```
 npm install
 npm start
 ```
+
+macOS will ask for Screen Recording permission on first run — grant it in
+System Settings and relaunch (without it you get the hole but no lensing).
+Windows needs no permission; shortcuts use `Ctrl` instead of `Cmd`.
 
 A tiny hole appears and starts drifting. Work for a while and it grows;
 walk away and it lets you go.

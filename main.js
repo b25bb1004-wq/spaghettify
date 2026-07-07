@@ -49,7 +49,9 @@ function createWindow() {
   win.setContentProtection(true);
 
   win.setAlwaysOnTop(true, "screen-saver");
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  if (process.platform !== "win32") {
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); // macOS/Linux only
+  }
 
   win.loadFile("index.html");
 
