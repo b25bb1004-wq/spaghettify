@@ -1,18 +1,16 @@
 # Spaghettify 🕳️
 
 A black hole that floats over your **entire screen** — Warp, Cursor, YouTube,
-NotebookLM, anything. Work too long without a break and it appears, roaming
-the screen and gravitationally lensing whatever's behind it. It grows while
-you're active (system-wide keyboard/mouse, any app) and starts releasing you
-after 90 seconds of quiet. Clicks pass straight through it.
+NotebookLM, anything. Launch it and forget it: **30 minutes later it appears**,
+roaming the screen and gravitationally lensing whatever's behind it, and spends
+**10 minutes growing to full size** — your cue to stand up. Then it vanishes
+and the cycle starts over. Clicks pass straight through it.
 
 It's a stretch alarm: when the hole shows up, stand up before it spaghettifies
 your spine.
 
 Inspired by [s0xDk/ghostty-blackhole](https://github.com/s0xDk/ghostty-blackhole),
-which lives inside the terminal. This is the desktop-wide cousin — and because
-Electron has memory, it uses a real work accumulator instead of the wall-clock
-approximation the stateless shader was forced into.
+which lives inside the terminal. This is the desktop-wide cousin.
 
 ## Run it
 
@@ -27,8 +25,8 @@ macOS will ask for Screen Recording permission on first run — grant it in
 System Settings and relaunch (without it you get the hole but no lensing).
 Windows needs no permission; shortcuts use `Ctrl` instead of `Cmd`.
 
-A tiny hole appears and starts drifting. Work for a while and it grows;
-walk away and it lets you go.
+Nothing shows at first — that's normal. The hole arrives 30 minutes after
+launch, grows for 10, then resets.
 
 ## Controls
 
@@ -46,11 +44,10 @@ Top of `index.html`:
 
 | knob | default | meaning |
 |---|---|---|
-| `WORK_MIN` | 55 | minutes of activity to reach full size |
-| `APPEAR_MIN` | 30 | minutes of continuous work before the hole appears at all |
-| `DEPLOY_MIN` | 10 | stretch alarm length: minutes to grow from natural size to full |
-| `IDLE_GRACE` | 90 | seconds of quiet before shrinking starts |
-| `IDLE_FADE` | 1800 | idle seconds to drain a full accumulator (also applies to time offline) |
+| `APPEAR_MIN` | 30 | minutes after launch until the hole appears |
+| `GROW_MIN` | 10 | minutes of growth from starting size to max, then the cycle resets |
+| `DEPLOY_MIN` | 10 | stretch alarm length (Cmd+Shift+D): minutes to grow to full |
+| `MIN_R_PX` | 22 | shadow radius at first appearance |
 | `MAX_FRAC` | 0.08 | max shadow radius vs screen (glowing disk reaches ~3.4× this) |
 
 Shader look (disk size, inclination, Doppler strength, ring) — constants at

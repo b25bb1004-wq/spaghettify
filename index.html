@@ -129,39 +129,24 @@ void main() {
 
 <script>
 // ============ knobs ============
-const WORK_MIN   = 55;
-const APPEAR_MIN = 30;     // hole stays hidden until this much continuous work
-const DEPLOY_MIN = 10;     // stretch alarm: minutes to grow from natural size to full
-const IDLE_GRACE = 90;
-const IDLE_FADE  = 1800;   // idle seconds to drain a full accumulator
-const MIN_R_PX   = 22;   // shadow radius at first appearance
+const APPEAR_MIN = 30;     // minutes after launch until the hole appears
+const GROW_MIN   = 10;     // minutes of growth from starting size to max, then reset
+const DEPLOY_MIN = 10;     // stretch alarm (Cmd+Shift+D): minutes to grow to full
+const MIN_R_PX   = 22;     // shadow radius at first appearance
 const MAX_FRAC   = 0.08;   // max shadow radius vs screen (disk reaches ~3.4x this)
 const CAP_FPS    = 30;     // capture frame rate
 
-// ============ state machine ============
-const WORK_SEC = WORK_MIN * 60;
+// ============ cycle timer ============
+// Fixed cycle from launch, irrespective of activity: invisible for
+// APPEAR_MIN, then GROW_MIN of growth to max, then reset and repeat.
 const APPEAR_SEC = APPEAR_MIN * 60;
-
-// accumulated work survives restarts; time spent offline drains at the
-// same rate as idling, so quitting doesn't zero your progress
-let activeSec = 0;
-let idleSec = 0;
-let lastSave = 0;
-
-// stretch alarm: Cmd+Shift+D summons the hole at natural size and it grows
-// for DEPLOY_MIN minutes, independent of accumulated work. -1 = not deployed.
+const GROW_SEC = GROW_MIN * 60;
 const DEPLOY_SEC = DEPLOY_MIN * 60;
-let deployT = -1;
+let elapsed = 0;   // seconds since this cycle began
+let deployT = -1;  // stretch alarm clock; -1 = not deployed
 
 if (window.blackhole) {
-  window.blackhole.onIdle((s) => { idleSec = s; });
   window.blackhole.onDeploy(() => { deployT = deployT < 0 ? 0 : -1; });
-  window.blackhole.loadState().then((saved) => {
-    if (saved && saved.t) {
-      const offline = Math.max(0, (Date.now() - saved.t) / 1000);
-      activeSec = Math.max(0, Math.min(WORK_SEC, saved.a - (WORK_SEC * offline) / IDLE_FADE));
-    }
-  }).catch(() => {});
 }
 
 let lastTick = performance.now();
@@ -169,15 +154,11 @@ setInterval(() => {
   const now = performance.now();
   const dt = (now - lastTick) / 1000;
   lastTick = now;
-  if (idleSec < IDLE_GRACE) activeSec = Math.min(WORK_SEC, activeSec + dt);
-  else activeSec = Math.max(0, activeSec - (WORK_SEC * dt) / IDLE_FADE);
+  elapsed += dt;
+  if (elapsed >= APPEAR_SEC + GROW_SEC) elapsed = 0; // hit max — reset the cycle
   if (deployT >= 0) {
     deployT += dt;
     if (deployT > DEPLOY_SEC) deployT = -1; // alarm over — retract
-  }
-  if (now - lastSave > 5000 && window.blackhole) {
-    lastSave = now;
-    window.blackhole.saveState(activeSec);
   }
 }, 250);
 
@@ -274,13 +255,12 @@ function frame(tms) {
   const dtf = Math.min(0.05, (tms - lastFrame) / 1000);
   lastFrame = tms;
 
-  // organic growth: hidden until APPEAR_SEC of work, full at WORK_SEC
-  const organic = activeSec <= APPEAR_SEC
-    ? 0
-    : Math.min(1, (activeSec - APPEAR_SEC) / (WORK_SEC - APPEAR_SEC));
+  // cycle: hidden until APPEAR_SEC after launch, then grows over GROW_SEC
+  const phase = elapsed - APPEAR_SEC;
+  const organic = phase <= 0 ? 0 : Math.min(1, phase / GROW_SEC);
   // stretch alarm: natural size at deploy, full after DEPLOY_SEC
   const alarm = deployT >= 0 ? Math.min(1, deployT / DEPLOY_SEC) : 0;
-  const on = activeSec > APPEAR_SEC || deployT >= 0;
+  const on = phase > 0 || deployT >= 0;
   const grow = Math.max(organic, alarm);
   const W = canvas.width, H = canvas.height;
 
