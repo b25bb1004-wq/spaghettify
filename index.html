@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  canvas { display: block; position: fixed; inset: 0; }
+  video { display: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="v" autoplay muted playsinline></video>
+
+<script id="frag" type="x-shader/x-fragment">
+precision highp float;
+
+uniform vec2      u_res;       // canvas size, px
+uniform vec2      u_center;    // hole center, px (GL coords, y-up)
+uniform float     u_radius;    // shadow radius, px
+uniform float     u_time;
+uniform float     u_grow;      // 0..1 mass
+uniform sampler2D u_screen;    // live screen capture
+uniform float     u_hasScreen; // 1 = lensing active, 0 = overlay-only fallback
+
+// ---- tunables ----
+const float DISK_INNER = 1.55;
+const float DISK_OUTER = 4.2;
+const float INCL       = 0.24;
+const float DOPPLER    = 0.55;
+const float RING_POS   = 1.06;
+const float LENS_GAIN  = 0.55;
+const float THETA_E    = 1.35;  // Einstein radius, in shadow radii
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1,0)), u.x),
+             mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) { v += a * vnoise(p); p = p * 2.1 + 17.3; a *= 0.5; }
+  return v;
+}
+
+vec3 ramp(float t) {
+  vec3 white = vec3(1.00, 0.97, 0.92);
+  vec3 gold  = vec3(1.00, 0.70, 0.28);
+  vec3 ember = vec3(0.85, 0.30, 0.10);
+  vec3 red   = vec3(0.35, 0.06, 0.03);
+  if (t > 0.66) return mix(gold, white, (t - 0.66) / 0.34);
+  if (t > 0.33) return mix(ember, gold, (t - 0.33) / 0.33);
+  return mix(red, ember, t / 0.33);
+}
+
+vec3 disk(vec2 q) {
+  float r = length(q);
+  if (r < DISK_INNER || r > DISK_OUTER) return vec3(0.0);
+  float az = atan(q.y, q.x);
+  float omega = 1.6 / pow(r, 1.5);
+  float streaks = 0.55 + 0.45 * fbm(vec2(az * 2.5 + u_time * omega * 3.0, log(r) * 6.0));
+  float fall = pow(DISK_INNER / r, 1.8);
+  float edge = smoothstep(DISK_INNER, DISK_INNER + 0.25, r)
+             * (1.0 - smoothstep(DISK_OUTER - 0.9, DISK_OUTER, r));
+  float g = 1.0 + DOPPLER * (-q.x / max(r, 1e-3));
+  float beam = pow(max(g, 0.1), 3.0);
+  float I = fall * edge * streaks * beam;
+  float temp = clamp(fall * (0.55 + 0.45 * beam), 0.0, 1.0);
+  return ramp(temp) * I;
+}
+
+void main() {
+  vec2 p = (gl_FragCoord.xy - u_center) / u_radius;
+  float d = length(p);
+
+  if (d > 8.0) { gl_FragColor = vec4(0.0); return; }
+
+  float vis = mix(0.30, 1.0, u_grow);
+  float tE2 = THETA_E * THETA_E;
+
+  // ---------- gravitational lensing of the real screen ----------
+  // Point-mass lens equation: source angle = image angle - thetaE^2/|p|^2 * p.
+  // Every pixel near the hole shows where its light actually came from.
+  vec3 bg = vec3(0.0);
+  float lensAlpha = 0.0;
+  if (u_hasScreen > 0.5) {
+    vec2 pSrc = p - tE2 * p / max(dot(p, p), 1e-5);
+    vec2 uvSrc = (u_center + pSrc * u_radius) / u_res;
+    uvSrc = clamp(uvSrc, vec2(0.001), vec2(0.999));
+    bg = texture2D(u_screen, uvSrc).rgb;
+
+    // only own the pixels we visibly bend: fade in with deflection size
+    float deflPx = length(p - pSrc) * u_radius;
+    lensAlpha = smoothstep(0.3, 1.2, deflPx);
+  }
+
+  vec3 col = bg;
+
+  // lensed halo of the far-side disk (inversion through the photon sphere)
+  vec2 pinv = p * (1.15 / max(dot(p, p), 1e-4));
+  col += disk(vec2(pinv.x, pinv.y / INCL)) * LENS_GAIN * vis;
+
+  // photon ring
+  float ring = exp(-pow((d - RING_POS) * 9.0, 2.0));
+  col += vec3(1.0, 0.86, 0.62) * ring * 1.3 * vis;
+
+  // shadow: rays inside the critical radius never reach you
+  float shadow = 1.0 - smoothstep(0.97, 1.0, d);
+  col = mix(col, vec3(0.0), shadow);
+
+  // near side of the disk crosses in front
+  float frontMask = smoothstep(0.35, -0.15, p.y);
+  col += disk(vec2(p.x, p.y / INCL)) * frontMask * vis;
+
+  float lum = dot(col, vec3(0.30, 0.55, 0.15));
+  float alpha = clamp(max(max(shadow, lensAlpha), lum * 1.6), 0.0, 1.0);
+  gl_FragColor = vec4(col, alpha);
+}
+</script>
+
+<script>
+// ============ knobs ============
+const WORK_MIN   = 55;
+const APPEAR_MIN = 30;     // hole stays hidden until this much continuous work
+const DEPLOY_MIN = 10;     // stretch alarm: minutes to grow from natural size to full
+const IDLE_GRACE = 90;
+const IDLE_FADE  = 1800;   // idle seconds to drain a full accumulator
+const MIN_R_PX   = 14;
+const MAX_FRAC   = 0.16;
+const CAP_FPS    = 30;     // capture frame rate
+
+// ============ state machine ============
+const WORK_SEC = WORK_MIN * 60;
+const APPEAR_SEC = APPEAR_MIN * 60;
+
+// accumulated work survives restarts; time spent offline drains at the
+// same rate as idling, so quitting doesn't zero your progress
+let activeSec = 0;
+let idleSec = 0;
+let lastSave = 0;
+
+// stretch alarm: Cmd+Shift+D summons the hole at natural size and it grows
+// for DEPLOY_MIN minutes, independent of accumulated work. -1 = not deployed.
+const DEPLOY_SEC = DEPLOY_MIN * 60;
+let deployT = -1;
+
+if (window.blackhole) {
+  window.blackhole.onIdle((s) => { idleSec = s; });
+  window.blackhole.onDeploy(() => { deployT = deployT < 0 ? 0 : -1; });
+  window.blackhole.loadState().then((saved) => {
+    if (saved && saved.t) {
+      const offline = Math.max(0, (Date.now() - saved.t) / 1000);
+      activeSec = Math.max(0, Math.min(WORK_SEC, saved.a - (WORK_SEC * offline) / IDLE_FADE));
+    }
+  }).catch(() => {});
+}
+
+let lastTick = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  const dt = (now - lastTick) / 1000;
+  lastTick = now;
+  if (idleSec < IDLE_GRACE) activeSec = Math.min(WORK_SEC, activeSec + dt);
+  else activeSec = Math.max(0, activeSec - (WORK_SEC * dt) / IDLE_FADE);
+  if (deployT >= 0) {
+    deployT += dt;
+    if (deployT > DEPLOY_SEC) deployT = -1; // alarm over — retract
+  }
+  if (now - lastSave > 5000 && window.blackhole) {
+    lastSave = now;
+    window.blackhole.saveState(activeSec);
+  }
+}, 250);
+
+// ============ WebGL ============
+const canvas = document.getElementById("c");
+const gl = canvas.getContext("webgl", { alpha: true, premultipliedAlpha: false });
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER,
+  "attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }"));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER,
+  document.getElementById("frag").textContent));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+  throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, "a");
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+const U = {};
+for (const n of ["u_res","u_center","u_radius","u_time","u_grow","u_screen","u_hasScreen"])
+  U[n] = gl.getUniformLocation(prog, n);
+
+// screen texture (NPOT-safe)
+const tex = gl.createTexture();
+gl.activeTexture(gl.TEXTURE0);
+gl.bindTexture(gl.TEXTURE_2D, tex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+gl.uniform1i(U.u_screen, 0);
+
+const DPR = Math.min(window.devicePixelRatio || 1, 1.5);
+function fit() {
+  canvas.width = Math.round(innerWidth * DPR);
+  canvas.height = Math.round(innerHeight * DPR);
+  canvas.style.width = innerWidth + "px";
+  canvas.style.height = innerHeight + "px";
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+fit();
+addEventListener("resize", fit);
+
+// ============ screen capture ============
+const video = document.getElementById("v");
+let hasScreen = false;
+
+async function startCapture() {
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: CAP_FPS },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+    hasScreen = true;
+  } catch (err) {
+    // Denied or unavailable: fall back to overlay-only mode.
+    console.warn("Screen capture unavailable, running without lensing:", err);
+    hasScreen = false;
+  }
+}
+startCapture();
+
+// ============ render loop ============
+let lastFrame = performance.now();
+let appear = 0; // eased on/off envelope so the hole fades in/out, never pops
+
+// free-roaming wander: drift toward a random waypoint anywhere on screen,
+// pick a new one on arrival (normalized 0..1 coords, small edge margin)
+const wander = {
+  x: 0.5, y: 0.5,
+  tx: 0.10 + Math.random() * 0.80,
+  ty: 0.10 + Math.random() * 0.80,
+};
+
+function frame(tms) {
+  const t = tms / 1000;
+  const dtf = Math.min(0.05, (tms - lastFrame) / 1000);
+  lastFrame = tms;
+
+  // organic growth: hidden until APPEAR_SEC of work, full at WORK_SEC
+  const organic = activeSec <= APPEAR_SEC
+    ? 0
+    : Math.min(1, (activeSec - APPEAR_SEC) / (WORK_SEC - APPEAR_SEC));
+  // stretch alarm: natural size at deploy, full after DEPLOY_SEC
+  const alarm = deployT >= 0 ? Math.min(1, deployT / DEPLOY_SEC) : 0;
+  const on = activeSec > APPEAR_SEC || deployT >= 0;
+  const grow = Math.max(organic, alarm);
+  const W = canvas.width, H = canvas.height;
+
+  appear += ((on ? 1 : 0) - appear) * Math.min(1, dtf * 2.5);
+  if (appear < 0.01) {
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    requestAnimationFrame(frame);
+    return;
+  }
+  const appearEase = appear * appear * (3 - 2 * appear);
+
+  const dxw = wander.tx - wander.x, dyw = wander.ty - wander.y;
+  const dist = Math.hypot(dxw, dyw);
+  if (dist < 0.01) {
+    wander.tx = 0.10 + Math.random() * 0.80;
+    wander.ty = 0.10 + Math.random() * 0.80;
+  } else {
+    const sp = (0.006 + 0.030 * grow) * dtf; // full-grown hole crosses the screen in ~30s
+    wander.x += (dxw / dist) * sp;
+    wander.y += (dyw / dist) * sp;
+  }
+  const cx = W * wander.x;
+  const cy = H * wander.y;
+
+  const maxR = Math.min(W, H) * MAX_FRAC;
+  const eased = grow * grow * (3 - 2 * grow);
+  // appear envelope scales the whole hole in/out; slow breathing keeps it alive
+  const breath = 1 + 0.015 * Math.sin(t * 1.1);
+  const radius = ((MIN_R_PX * DPR) + (maxR - MIN_R_PX * DPR) * eased) * appearEase * breath;
+
+  // upload the latest captured frame
+  if (hasScreen && video.readyState >= 2) {
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
+  }
+
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform2f(U.u_res, W, H);
+  gl.uniform2f(U.u_center, cx, cy);
+  gl.uniform1f(U.u_radius, radius);
+  gl.uniform1f(U.u_time, t);
+  gl.uniform1f(U.u_grow, grow);
+  gl.uniform1f(U.u_hasScreen, hasScreen ? 1 : 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

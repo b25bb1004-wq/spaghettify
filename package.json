@@ -1,0 +1,12 @@
+{
+  "name": "spaghettify",
+  "version": "1.0.0",
+  "description": "A black hole that floats over your whole screen — grows while you grind, releases you when you step away. When it appears, go stretch.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
